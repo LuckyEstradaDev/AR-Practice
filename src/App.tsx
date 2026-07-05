@@ -1,5 +1,9 @@
-import {useEffect, useRef} from "react";
-import WebCam, {type WebcamHandle} from "./components/WebCam";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import {SetStateAction, useEffect, useRef} from "react";
+import WebCam, {WebcamHandle} from "./components/WebCam";
+import {X} from "lucide-react";
+
+const sleeveImagePath = "./assets/sleeve.png";
 
 import {
   DrawingUtils,
@@ -7,18 +11,26 @@ import {
   PoseLandmarker,
 } from "@mediapipe/tasks-vision";
 
-function App() {
+export function AR({
+  image,
+  onClose,
+}: {
+  image: string | File | undefined;
+  onClose: React.Dispatch<SetStateAction<boolean>>;
+}) {
   const webcamRef = useRef<WebcamHandle | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const prevLandmarksRef = useRef<any>(null);
+  const SMOOTHING = 0.3;
 
   useEffect(() => {
     let poseLandmarker: PoseLandmarker | null = null;
     let animationFrameId = 0;
     let isMounted = true;
 
-    // 👕 Load shirt image
     const shirtImg = new Image();
-    shirtImg.src = "/shirt.png";
+    shirtImg.src = image!.toString();
+    const SleeveImg = new Image();
 
     const setup = async () => {
       const vision = await FilesetResolver.forVisionTasks(
@@ -47,86 +59,129 @@ function App() {
           return;
         }
 
-        // Sync canvas with video
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         canvas.style.width = "100%";
         canvas.style.height = "100%";
 
-        const drawingUtils = new DrawingUtils(ctx);
+        poseLandmarker.detectForVideo(
+          video,
+          performance.now(),
+          (result: {landmarks: any}) => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        poseLandmarker.detectForVideo(video, performance.now(), (result) => {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < result.landmarks.length; i++) {
+              const landmark = result.landmarks[i];
 
-          for (const landmark of result.landmarks) {
-            const ls = landmark[11];
-            const rs = landmark[12];
-            const lh = landmark[23];
-            const rh = landmark[24];
+              if (!prevLandmarksRef.current)
+                prevLandmarksRef.current = landmark;
+              const prev = prevLandmarksRef.current;
 
-            if (!ls || !rs || !lh || !rh) continue;
+              for (let j = 0; j < landmark.length; j++) {
+                landmark[j].x =
+                  landmark[j].x * SMOOTHING + prev[j].x * (1 - SMOOTHING);
+                landmark[j].y =
+                  landmark[j].y * SMOOTHING + prev[j].y * (1 - SMOOTHING);
+              }
+              prevLandmarksRef.current = landmark;
 
-            const toPixel = (p: any) => ({
-              x: p.x * canvas.width,
-              y: p.y * canvas.height,
-            });
+              const ls = landmark[11];
+              const rs = landmark[12];
+              const lh = landmark[23];
+              const rh = landmark[24];
 
-            const leftS = toPixel(ls);
-            const rightS = toPixel(rs);
-            const leftH = toPixel(lh);
-            const rightH = toPixel(rh);
+              if (!ls || !rs || !lh || !rh) continue;
 
-            // 🔥 BETTER CENTER (between chest and hips)
-            const chestY = (leftS.y + rightS.y) / 2;
-            const hipY = (leftH.y + rightH.y) / 2;
+              const toPixel = (p: any) => ({
+                x: p.x * canvas.width,
+                y: p.y * canvas.height,
+              });
 
-            const centerX = (leftS.x + rightS.x) / 2;
-            const centerY = (chestY + hipY) / 2;
+              // const leftS = toPixel(ls);
 
-            // 🔥 SIZE IMPROVEMENTS
-            const shoulderWidth = Math.hypot(
-              rightS.x - leftS.x,
-              rightS.y - leftS.y,
-            );
+              // const rightS = toPixel(rs);
+              // const leftH = toPixel(lh);
+              // const rightH = toPixel(rh);
 
-            const torsoHeight =
-              (Math.hypot(leftH.y - leftS.y, leftH.x - leftS.x) +
-                Math.hypot(rightH.y - rightS.y, rightH.x - rightS.x)) /
-              2;
+              // const chestY = (leftS.y + rightS.y) / 2;
+              // const hipY = (leftH.y + rightH.y) / 2;
 
-            const width = shoulderWidth * 1.4;
-            const height = torsoHeight * 2.2;
+              // const centerX = (leftS.x + rightS.x) / 2;
+              // const centerY = (chestY + hipY) / 2;
 
-            // 🔥 BETTER ROTATION (no upside down)
-            let angle = Math.atan2(rightS.y - leftS.y, rightS.x - leftS.x);
+              // const shoulderWidth = Math.hypot(
+              //   rightS.x - leftS.x,
+              //   rightS.y - leftS.y,
+              // );
 
-            if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-              angle += Math.PI;
+              // const torsoHeight =
+              //   (Math.hypot(leftH.y - leftS.y, leftH.x - leftS.x) +
+              //     Math.hypot(rightH.y - rightS.y, rightH.x - rightS.x)) /
+              //   2;
+
+              // const width = shoulderWidth * 0.2;
+              // const height = torsoHeight * 0.2;
+              // let angle = Math.atan2(rightS.y - leftS.y, rightS.x - leftS.x);
+              // if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+              //   angle += Math.PI;
+              // }
+
+              // ctx.save();
+              // ctx.translate(centerX, centerY);
+              // ctx.rotate(angle);
+              // ctx.drawImage(
+              //   shirtImg,
+              //   -width / 2,
+              //   -height * 0.27,
+              //   width,
+              //   height,
+              // );
+
+              //left shoulder to left elbow
+              //the cam is inverted so the left shoulder is actually the right shoulder
+              // 1. Get landmarks
+              const shoulder = landmark[12];
+              const elbow = landmark[14];
+
+              // 2. Convert to pixels
+              const shoulderX = shoulder.x * canvas.width;
+              const shoulderY = shoulder.y * canvas.height;
+              const elbowX = elbow.x * canvas.width;
+              const elbowY = elbow.y * canvas.height;
+
+              // 3. Calculate direction
+              const dx = elbowX - shoulderX;
+              const dy = elbowY - shoulderY;
+
+              // 4. Calculate angle
+              const angle = Math.atan2(dy, dx);
+
+              // 5. Calculate arm length
+              const armLength = Math.sqrt(dx * dx + dy * dy);
+
+              // 6. Calculate scale
+              const scale = armLength / SleeveImg.height;
+
+              // 7. Draw
+              ctx.save();
+              ctx.translate(shoulderX - 60, shoulderY);
+              ctx.rotate(angle + 300);
+              ctx.scale(scale + 0.2, scale);
+              ctx.drawImage(SleeveImg, 0, 0);
+              ctx.restore();
+
+              const drawingUtils = new DrawingUtils(ctx);
+              drawingUtils.drawLandmarks(landmark, {radius: 5, color: "red"});
+              drawingUtils.drawConnectors(
+                landmark,
+                PoseLandmarker.POSE_CONNECTIONS,
+                {
+                  color: "green",
+                },
+              );
             }
-
-            // 👕 DRAW SHIRT
-            ctx.save();
-            ctx.translate(centerX, centerY);
-            ctx.rotate(angle);
-
-            ctx.drawImage(
-              shirtImg,
-              -width / 2,
-              -height * 0.35, // 🔥 vertical adjustment
-              width,
-              height,
-            );
-
-            ctx.restore();
-
-            // OPTIONAL: skeleton
-            drawingUtils.drawLandmarks(landmark);
-            drawingUtils.drawConnectors(
-              landmark,
-              PoseLandmarker.POSE_CONNECTIONS,
-            );
-          }
-        });
+          },
+        );
 
         animationFrameId = requestAnimationFrame(predict);
       };
@@ -144,19 +199,21 @@ function App() {
   }, []);
 
   return (
-    <main className="grid min-h-screen place-items-center bg-slate-950 p-6">
-      <section className="w-full max-w-3xl rounded-2xl border border-slate-700 bg-slate-900 p-4 text-slate-100 shadow-2xl">
-        <div className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-xl border border-slate-700">
-          <WebCam ref={webcamRef} />
+    <div className="fixed inset-0 z-50 bg-black">
+      {/* Close button */}
+      <button
+        onClick={() => onClose((prev) => !prev)}
+        className="absolute right-4 top-4 z-10 flex size-10 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition-colors hover:bg-black/70"
+      >
+        <X className="size-5" />
+      </button>
 
-          <canvas
-            ref={canvasRef}
-            className="pointer-events-none absolute inset-0"
-          />
-        </div>
-      </section>
-    </main>
+      <WebCam ref={webcamRef} />
+
+      <canvas
+        ref={canvasRef}
+        className="pointer-events-none absolute inset-0"
+      />
+    </div>
   );
 }
-
-export default App;

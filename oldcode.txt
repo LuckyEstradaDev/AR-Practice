@@ -1,0 +1,191 @@
+  const drawLeftElbowToWrist = (
+    ctx: CanvasRenderingContext2D,
+    landmark: any,
+    canvas: HTMLCanvasElement,
+    image: HTMLImageElement,
+  ) => {
+    const elbow = landmark[14];
+    const wrist = landmark[16];
+
+    // Convert to pixels
+    const elbowX = elbow.x * canvas.width;
+    const elbowY = elbow.y * canvas.height;
+    const wristX = wrist.x * canvas.width;
+    const wristY = wrist.y * canvas.height;
+
+    // Calculate direction
+    const dx = wristX - elbowX;
+    const dy = wristY - elbowY;
+
+    // Calculate angle
+    const angle = Math.atan2(dy, dx);
+
+    // Calculate arm length
+    const armLength = Math.sqrt(dx * dx + dy * dy);
+
+    // Calculate scale
+    const scale = armLength / image.height;
+
+    // Draw
+    ctx.save();
+    ctx.translate(elbowX - 50, elbowY);
+    ctx.rotate(angle + 300);
+    ctx.scale(scale, scale);
+    ctx.drawImage(image, 0, 0);
+    ctx.restore();
+  };
+
+  const drawRightElbowToWrist = (
+    ctx: CanvasRenderingContext2D,
+    landmark: any,
+    canvas: HTMLCanvasElement,
+    image: HTMLImageElement,
+  ) => {
+    const elbow = landmark[13];
+    const wrist = landmark[15];
+
+    // Convert to pixels
+    const elbowX = elbow.x * canvas.width;
+    const elbowY = elbow.y * canvas.height;
+    const wristX = wrist.x * canvas.width;
+    const wristY = wrist.y * canvas.height;
+
+    // Calculate direction
+    const dx = wristX - elbowX;
+    const dy = wristY - elbowY;
+
+    // Calculate angle
+    const angle = Math.atan2(dy, dx);
+
+    // Calculate arm length
+    const armLength = Math.sqrt(dx * dx + dy * dy);
+
+    // Calculate scale
+    const scale = armLength / image.height;
+
+    // Draw
+    ctx.save();
+    ctx.translate(elbowX - 50, elbowY);
+    ctx.rotate(angle + 300);
+    ctx.scale(scale, scale);
+    ctx.drawImage(image, 0, 0);
+    ctx.restore();
+  };
+
+
+    const drawLeftSleeve = (
+    ctx: CanvasRenderingContext2D,
+    landmark: any,
+    canvas: HTMLCanvasElement,
+    leftSleeveImg: HTMLImageElement,
+  ) => {
+    if (!leftSleeveImg.complete || !leftSleeveImg.naturalWidth) return;
+    const shoulder = landmark[12];
+    const elbow = landmark[14];
+
+    // 2. Convert to pixels
+    const shoulderX = shoulder.x * canvas.width;
+    const shoulderY = shoulder.y * canvas.height;
+    const elbowX = elbow.x * canvas.width;
+    const elbowY = elbow.y * canvas.height;
+
+    // 3. Calculate direction
+    const dx = elbowX - shoulderX;
+    const dy = elbowY - shoulderY;
+
+    // 4. Calculate angle
+    const angle = Math.atan2(dy, dx);
+
+    // 5. Calculate arm length
+    const armLength = Math.sqrt(dx * dx + dy * dy);
+
+    // 6. Calculate scale
+    const scale = armLength / leftSleeveImg.height;
+
+    // 7. Draw
+    ctx.save();
+    ctx.translate(shoulderX - 120, shoulderY - 60);
+    ctx.rotate(angle + 300);
+    ctx.scale(scale + 0.2, scale);
+    ctx.drawImage(leftSleeveImg, 0, 0);
+    ctx.restore();
+  };
+
+  const drawRightSleeve = (
+    ctx: CanvasRenderingContext2D,
+    landmark: any,
+    canvas: HTMLCanvasElement,
+    rightSleeveImg: HTMLImageElement,
+  ) => {
+    if (!rightSleeveImg.complete || !rightSleeveImg.naturalWidth) return;
+    const shoulder = landmark[11];
+    const elbow = landmark[13];
+
+    // 2. Convert to pixels
+    const shoulderX = shoulder.x * canvas.width;
+    const shoulderY = shoulder.y * canvas.height;
+    const elbowX = elbow.x * canvas.width;
+    const elbowY = elbow.y * canvas.height;
+
+    // 3. Calculate direction
+    const dx = elbowX - shoulderX;
+    const dy = elbowY - shoulderY;
+
+    // 4. Calculate angle
+    const angle = Math.atan2(dy, dx);
+
+    // 5. Calculate arm length
+    const armLength = Math.sqrt(dx * dx + dy * dy);
+
+    // 6. Calculate scale
+    const scale = armLength / rightSleeveImg.height;
+
+    // 7. Draw
+    ctx.save();
+    ctx.translate(shoulderX - 60, shoulderY);
+    ctx.rotate(angle + 300);
+    ctx.scale(scale + 0.2, scale);
+    ctx.drawImage(rightSleeveImg, 0, 0);
+    ctx.restore();
+  };
+
+  const drawTorso = (
+    ctx: CanvasRenderingContext2D,
+    landmark: any,
+    canvas: HTMLCanvasElement,
+    torsoImg: HTMLImageElement,
+  ) => {
+    if (!torsoImg.complete || !torsoImg.naturalWidth) return;
+    const leftShoulder = landmark[11];
+    const rightShoulder = landmark[12];
+    const leftHip = landmark[23];
+    const rightHip = landmark[24];
+
+    // Convert to pixels
+    const leftShoulderX = leftShoulder.x * canvas.width;
+    const leftShoulderY = leftShoulder.y * canvas.height;
+    const rightShoulderX = rightShoulder.x * canvas.width;
+    const rightShoulderY = rightShoulder.y * canvas.height;
+    const leftHipX = leftHip.x * canvas.width;
+    const leftHipY = leftHip.y * canvas.height;
+    const rightHipX = rightHip.x * canvas.width;
+    const rightHipY = rightHip.y * canvas.height;
+
+    // Calculate center and size
+    const centerX = (leftShoulderX + rightShoulderX + leftHipX + rightHipX) / 4;
+    const centerY = (leftShoulderY + rightShoulderY + leftHipY + rightHipY) / 4;
+    const width = Math.hypot(
+      rightShoulderX - leftShoulderX,
+      rightShoulderY - leftShoulderY,
+    );
+    const height = Math.hypot(
+      leftHipY - leftShoulderY,
+      leftHipX - leftShoulderX,
+    );
+
+    // Draw torso image
+    ctx.save();
+    ctx.translate(centerX, centerY - 40);
+    ctx.drawImage(torsoImg, -width / 2, -height / 2, width, height);
+    ctx.restore();
+  };

@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef } from "react";
+import {forwardRef, useImperativeHandle, useRef} from "react";
 import Webcam from "react-webcam";
 
 export type WebcamHandle = {
@@ -15,8 +15,9 @@ const WebCam = forwardRef<WebcamHandle>((_props, ref) => {
   }));
 
   return (
-    <div className="aspect-video w-full bg-black">
+    <div className="aspect-video w-[40%] bg-black">
       <Webcam
+        mirrored={true}
         ref={webcamRef}
         screenshotFormat="image/jpeg"
         className="h-full w-full object-cover"

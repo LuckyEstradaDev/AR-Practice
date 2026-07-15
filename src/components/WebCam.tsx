@@ -5,7 +5,12 @@ export type WebcamHandle = {
   video?: HTMLVideoElement;
 };
 
-const WebCam = forwardRef<WebcamHandle>((_props, ref) => {
+type WebCamProps = {
+  onStatusChange?: (message: string) => void;
+};
+
+const WebCam = forwardRef<WebcamHandle, WebCamProps>((props, ref) => {
+  const {onStatusChange} = props;
   const webcamRef = useRef<Webcam>(null);
 
   useImperativeHandle(ref, () => ({
@@ -19,7 +24,11 @@ const WebCam = forwardRef<WebcamHandle>((_props, ref) => {
       <Webcam
         mirrored={true}
         ref={webcamRef}
+        audio={false}
         screenshotFormat="image/jpeg"
+        videoConstraints={{facingMode: "user", width: 640, height: 480}}
+        onUserMedia={() => onStatusChange?.("Camera ready")}
+        onUserMediaError={() => onStatusChange?.("Camera access denied")}
         className="h-full w-full object-cover"
       />
     </div>

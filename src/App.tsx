@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {SetStateAction, useEffect, useRef} from "react";
+import {SetStateAction, useEffect, useRef, useState} from "react";
 import WebCam, {WebcamHandle} from "./components/WebCam";
 import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
 import {X} from "lucide-react";
@@ -28,9 +28,7 @@ export default function App({
   const webcamRef = useRef<WebcamHandle | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const threeContainerRef = useRef<HTMLDivElement | null>(null);
-  const drawingUtils = new DrawingUtils(
-    canvasRef.current?.getContext("2d") as CanvasRenderingContext2D,
-  );
+  const [statusMessage, setStatusMessage] = useState("Starting camera...");
 
   useEffect(() => {
     let poseLandmarker: PoseLandmarker | null = null;
@@ -52,9 +50,10 @@ export default function App({
       1000,
     );
 
-    camera.position.set(0, 1.5, 5);
-    camera.lookAt(0, 1, 0);
-    const renderer = new THREE.WebGLRenderer();
+    camera.position.set(0, 1.2, 4.5);
+    camera.lookAt(0, 1.2, 0);
+    const renderer = new THREE.WebGLRenderer({antialias: true});
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     threeContainerRef.current?.appendChild(renderer.domElement);
     renderer.render(scene, camera);
@@ -77,7 +76,6 @@ export default function App({
     loader.load(modelUrl, (gltf: {scene: any}) => {
       shirt = gltf.scene;
       shirt.traverse((child: any) => {
-        console.log(child.name);
         if (child instanceof THREE.Bone) {
           if (child.name === "arm_left_shoulder_2_010") {
             leftArm = child;
@@ -87,6 +85,9 @@ export default function App({
           }
         }
       });
+      shirt.position.set(0, 0.8, 0);
+      shirt.scale.set(1, 1, 1);
+      shirt.rotation.set(0, 0, 0);
       scene.add(shirt);
       scene.add(new THREE.AmbientLight(0xffffff, 2));
       const dir = new THREE.DirectionalLight(0xffffff, 2);
@@ -96,18 +97,29 @@ export default function App({
     });
 
     const setup = async () => {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm",
-      );
+      try {
+        setStatusMessage("Loading pose model...");
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm",
+        );
 
-      poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: "../public/models/pose_landmarker_full.task",
-          delegate: "GPU",
-        },
-        runningMode: "VIDEO",
-        numPoses: 1,
-      });
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "/models/pose_landmarker_full.task",
+            delegate: "CPU",
+          },
+          runningMode: "VIDEO",
+          numPoses: 1,
+        });
+        setStatusMessage("Tracking body pose...");
+      } catch (error) {
+        console.error("Pose setup failed", error);
+        setStatusMessage(
+          "Pose setup failed. Please refresh and allow camera access.",
+        );
+        return;
+      }
+
       const predict = async () => {
         if (!isMounted || !poseLandmarker) return;
 
@@ -115,48 +127,75 @@ export default function App({
         const canvas = canvasRef.current;
         const ctx = canvas?.getContext("2d");
 
-        if (!video || !canvas || !ctx || video.readyState < 2) {
+        if (!video || !canvas || !ctx) {
           animationFrameId = requestAnimationFrame(predict);
           return;
         }
 
-        // Sync canvas with video
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.style.width = "100%";
-        canvas.style.height = "100%";
+        if (video.readyState < 2) {
+          if (video.paused) {
+            void video.play().catch(() => {
+              setStatusMessage("Allow autoplay to start the pose tracker");
+            });
+          }
+          animationFrameId = requestAnimationFrame(predict);
+          return;
+        }
+
+        if (video.videoWidth && video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          canvas.style.width = "100%";
+          canvas.style.height = "100%";
+        }
 
         const drawingUtils = new DrawingUtils(ctx);
 
         poseLandmarker.detectForVideo(video, performance.now(), (result) => {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+          if (!result.landmarks?.length) {
+            setStatusMessage("Waiting for pose...");
+            return;
+          }
+
           for (const landmark of result.landmarks) {
             const leftShoulder = landmark[11];
             const rightShoulder = landmark[12];
 
-            if (leftShoulder && rightShoulder) {
-              const leftX = leftShoulder.x * canvas.width;
-              const leftY = leftShoulder.y * canvas.height;
-              const rightX = rightShoulder.x * canvas.width;
-              const rightY = rightShoulder.y * canvas.height;
-
-              if (shirt) {
-                shirt.position.set(
-                  (leftX + rightX) / 2 / canvas.width - 0.5,
-                  (leftY + rightY) / 2 / canvas.height - 0.5,
-                  0,
-                );
-                shirt.scale.set(
-                  Math.abs(rightX - leftX) / canvas.width,
-                  Math.abs(rightY - leftY) / canvas.height,
-                  1,
-                );
-              }
-
-              leftArm.rotation.z = Math.atan2(leftY - rightY, leftX - rightX);
-              rightArm.rotation.z = Math.atan2(rightY - leftY, rightX - leftX);
+            if (!leftShoulder || !rightShoulder) {
+              continue;
             }
+
+            if (shirt) {
+              const centerX = (leftShoulder.x + rightShoulder.x) / 2;
+              const centerY = (leftShoulder.y + rightShoulder.y) / 2;
+              const shoulderWidth = Math.hypot(
+                leftShoulder.x - rightShoulder.x,
+                leftShoulder.y - rightShoulder.y,
+              );
+
+              shirt.position.set(
+                (centerX - 0.5) * 3.5,
+                -(centerY - 0.5) * 3.5 + 1.2,
+                0,
+              );
+              shirt.scale.setScalar(Math.max(0.8, shoulderWidth * 2.2));
+              shirt.rotation.y = (leftShoulder.x - rightShoulder.x) * 0.3;
+              shirt.rotation.z = (rightShoulder.y - leftShoulder.y) * 0.2;
+
+              if (leftArm) {
+                leftArm.position.x = (leftShoulder.x - rightShoulder.x) * 0.5;
+              }
+              if (rightArm) {
+                rightArm.rotation.z = (rightShoulder.y - leftShoulder.y) * 0.5;
+              }
+            }
+
+            setStatusMessage("Pose detected");
+
+            ctx.save();
+            ctx.globalAlpha = 0.5;
 
             drawingUtils.drawLandmarks(landmark, {
               radius: (data) =>
@@ -168,13 +207,6 @@ export default function App({
               PoseLandmarker.POSE_CONNECTIONS,
             );
             ctx.restore();
-
-            // OPTIONAL: skeleton
-            drawingUtils.drawLandmarks(landmark);
-            drawingUtils.drawConnectors(
-              landmark,
-              PoseLandmarker.POSE_CONNECTIONS,
-            );
           }
         });
 
@@ -204,8 +236,12 @@ export default function App({
       </button>
 
       <div className="pointer-events-none flex absolute inset-0 z-20 overflow-hidden">
-        <WebCam ref={webcamRef} />
+        <WebCam ref={webcamRef} onStatusChange={setStatusMessage} />
         <div ref={threeContainerRef} className="h-full w-[80%]" />
+      </div>
+
+      <div className="pointer-events-none absolute left-4 top-4 z-40 rounded-full bg-black/70 px-3 py-1 text-sm text-white">
+        {statusMessage}
       </div>
 
       <canvas

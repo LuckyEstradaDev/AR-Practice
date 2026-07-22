@@ -20,7 +20,7 @@ const WebCam = forwardRef<WebcamHandle, WebCamProps>((props, ref) => {
   }));
 
   return (
-    <div className="aspect-video w-[40%] bg-black">
+    <div className="aspect-video w-[100%] bg-black">
       <Webcam
         mirrored={true}
         ref={webcamRef}

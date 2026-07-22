@@ -52,10 +52,18 @@ export default function App({
 
     camera.position.set(0, 1.2, 4.5);
     camera.lookAt(0, 1.2, 0);
-    const renderer = new THREE.WebGLRenderer({antialias: true});
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const renderer = new THREE.WebGLRenderer({alpha: true});
+
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.domElement.style.position = "absolute";
+    renderer.domElement.style.inset = "0";
+    renderer.domElement.style.zIndex = "25";
+    renderer.domElement.style.pointerEvents = "none";
+    renderer.domElement.style.transform = "scaleX(-1)";
     threeContainerRef.current?.appendChild(renderer.domElement);
+
     renderer.render(scene, camera);
 
     const animate = () => {
@@ -85,7 +93,7 @@ export default function App({
           }
         }
       });
-      shirt.position.set(0, 0.8, 0);
+      shirt.position.set(0, 266.8, 0);
       shirt.scale.set(1, 1, 1);
       shirt.rotation.set(0, 0, 0);
       scene.add(shirt);
@@ -93,8 +101,9 @@ export default function App({
       const dir = new THREE.DirectionalLight(0xffffff, 2);
       dir.position.set(5, 5, 5);
       scene.add(dir);
-      animate();
     });
+
+    animate();
 
     const setup = async () => {
       try {
@@ -175,12 +184,92 @@ export default function App({
                 leftShoulder.y - rightShoulder.y,
               );
 
+              // landmark indices (MediaPipe Pose)
+              const L_SH = 11,
+                L_EL = 13,
+                L_WR = 15;
+              const R_SH = 12,
+                R_EL = 14,
+                R_WR = 16;
+
+              // helper to map normalized landmark -> THREE world-like coords
+              const mapLandmarkToWorld = (lm: {
+                x: number;
+                y: number;
+                z: number;
+              }) => {
+                const mirrored = true; // set false if webcam not mirrored
+                const x = ((mirrored ? 1 - lm.x : lm.x) - 0.5) * 3.5; // same horizontal scale you use for shirt
+                const y = -(lm.y - 0.5) * 3.5 + 1.2; // same vertical mapping as shirt
+                const z = -lm.z * 4.0; // tune depth scale (z sign may need flip)
+                return new THREE.Vector3(x, y, z);
+              };
+
+              if (leftArm && rightArm) {
+                const lShoulder = mapLandmarkToWorld(landmark[L_SH]);
+                const lElbow = mapLandmarkToWorld(landmark[L_EL]);
+                const rShoulder = mapLandmarkToWorld(landmark[R_SH]);
+                const rElbow = mapLandmarkToWorld(landmark[R_EL]);
+
+                // desired directions in world-like coords
+                const lDir = new THREE.Vector3()
+                  .subVectors(lElbow, lShoulder)
+                  .normalize();
+                const rDir = new THREE.Vector3()
+                  .subVectors(rElbow, rShoulder)
+                  .normalize();
+
+                // convert world-like positions to the bone's parent-local space (important)
+                const lParent = leftArm.parent!;
+                const rParent = rightArm.parent!;
+
+                const lDirLocal = lDir.clone();
+                const rDirLocal = rDir.clone();
+
+                // If you computed positions instead of directions, do:
+                // lParent.worldToLocal(lShoulder); lParent.worldToLocal(lElbow); compute dirLocal from those.
+                // Here we assume consistent mapping so converting direction by inverse rotation helps:
+                lParent
+                  .getWorldQuaternion(new THREE.Quaternion())
+                  .invert()
+                  .multiplyVector3?.(lDirLocal); // fallback explained below
+
+                // safest approach: compute shoulder/elbow in parent-local then subtract:
+                const lShoulderWorld = mapLandmarkToWorld(landmark[L_SH]);
+                const lElbowWorld = mapLandmarkToWorld(landmark[L_EL]);
+                lParent.worldToLocal(lShoulderWorld);
+                lParent.worldToLocal(lElbowWorld);
+                lDirLocal.copy(lElbowWorld).sub(lShoulderWorld).normalize();
+
+                const rShoulderWorld = mapLandmarkToWorld(landmark[R_SH]);
+                const rElbowWorld = mapLandmarkToWorld(landmark[R_EL]);
+                rParent.worldToLocal(rShoulderWorld);
+                rParent.worldToLocal(rElbowWorld);
+                rDirLocal.copy(rElbowWorld).sub(rShoulderWorld).normalize();
+
+                // assume bone's rest direction is +Y (0,1,0). If different, change restAxis
+                const restAxis = new THREE.Vector3(0, 1, 0);
+
+                const lQuat = new THREE.Quaternion().setFromUnitVectors(
+                  restAxis,
+                  lDirLocal,
+                );
+                const rQuat = new THREE.Quaternion().setFromUnitVectors(
+                  restAxis,
+                  rDirLocal,
+                );
+
+                // smooth the movement
+                leftArm.quaternion.slerp(lQuat, 0.6);
+                rightArm.quaternion.slerp(rQuat, 0.6);
+              }
+
               shirt.position.set(
                 (centerX - 0.5) * 3.5,
-                -(centerY - 0.5) * 3.5 + 1.2,
+                -centerY * 3.5 + 1.2,
                 0,
               );
-              shirt.scale.setScalar(Math.max(0.8, shoulderWidth * 2.2));
+              shirt.scale.setScalar(Math.max(0.8, shoulderWidth * 4.2));
               shirt.rotation.y = (leftShoulder.x - rightShoulder.x) * 0.3;
               shirt.rotation.z = (rightShoulder.y - leftShoulder.y) * 0.2;
 
@@ -222,6 +311,17 @@ export default function App({
       isMounted = false;
       cancelAnimationFrame(animationFrameId);
       poseLandmarker?.close();
+
+      // Remove Three.js renderer
+      if (
+        threeContainerRef.current &&
+        threeContainerRef.current.contains(renderer.domElement)
+      ) {
+        threeContainerRef.current.removeChild(renderer.domElement);
+      }
+
+      // Dispose Three.js renderer
+      renderer.dispose();
     };
   }, []);
 
@@ -235,9 +335,14 @@ export default function App({
         <X className="size-5" />
       </button>
 
-      <div className="pointer-events-none flex absolute inset-0 z-20 overflow-hidden">
-        <WebCam ref={webcamRef} onStatusChange={setStatusMessage} />
-        <div ref={threeContainerRef} className="h-full w-[80%]" />
+      <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+        {/* Webcam */}
+        <div className="absolute inset-0">
+          <WebCam ref={webcamRef} onStatusChange={setStatusMessage} />
+        </div>
+
+        {/* Three.js */}
+        <div ref={threeContainerRef} className="absolute inset-0" />
       </div>
 
       <div className="pointer-events-none absolute left-4 top-4 z-40 rounded-full bg-black/70 px-3 py-1 text-sm text-white">
@@ -246,7 +351,7 @@ export default function App({
 
       <canvas
         ref={canvasRef}
-        className="pointer-events-none absolute inset-0 z-30"
+        className="pointer-events-none absolute inset-0 z-30 -scale-x-100"
       />
     </div>
   );

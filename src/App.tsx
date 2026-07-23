@@ -37,8 +37,8 @@ export default function App({
 
     //model
     let shirt: THREE.Object3D | null = null;
-    let leftArm: THREE.Bone;
-    let rightArm: THREE.Bone;
+    let leftArm: THREE.Bone | null = null;
+    let rightArm: THREE.Bone | null = null;
     const clock = new THREE.Clock();
 
     const loader = new GLTFLoader();
@@ -61,7 +61,6 @@ export default function App({
     renderer.domElement.style.inset = "0";
     renderer.domElement.style.zIndex = "25";
     renderer.domElement.style.pointerEvents = "none";
-    renderer.domElement.style.transform = "scaleX(-1)";
     threeContainerRef.current?.appendChild(renderer.domElement);
 
     renderer.render(scene, camera);
@@ -93,7 +92,7 @@ export default function App({
           }
         }
       });
-      shirt.position.set(0, 266.8, 0);
+      shirt.position.set(0, 0, 0);
       shirt.scale.set(1, 1, 1);
       shirt.rotation.set(0, 0, 0);
       scene.add(shirt);
@@ -163,7 +162,10 @@ export default function App({
         poseLandmarker.detectForVideo(video, performance.now(), (result) => {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-          if (!result.landmarks?.length) {
+          if (
+            !result.landmarks?.length ||
+            result.worldLandmarks?.length === 0
+          ) {
             setStatusMessage("Waiting for pose...");
             return;
           }
@@ -176,108 +178,73 @@ export default function App({
               continue;
             }
 
-            if (shirt) {
-              const centerX = (leftShoulder.x + rightShoulder.x) / 2;
-              const centerY = (leftShoulder.y + rightShoulder.y) / 2;
-              const shoulderWidth = Math.hypot(
-                leftShoulder.x - rightShoulder.x,
-                leftShoulder.y - rightShoulder.y,
+            // Reusable helper: turns a MediaPipe landmark (x,y in 0-1) into a Three.js Vector3
+            function landmarkToWorld(
+              landmark: {x: number; y: number},
+              camera: THREE.PerspectiveCamera,
+              depth = 4.5,
+            ) {
+              // Convert 0-1 range to Three.js "NDC" range (-1 to 1)
+              // Flip x because your video is mirrored (scaleX(-1) on the canvas)
+              const ndcX = -(landmark.x * 2 - 1);
+              const ndcY = -(landmark.y * 2 - 1); // y is also flipped: MediaPipe y grows downward, Three.js grows upward
+
+              const vector = new THREE.Vector3(ndcX, ndcY, 0.5); // z=0.5 is just "somewhere between near/far plane"
+              vector.unproject(camera);
+
+              const dir = vector.sub(camera.position).normalize();
+              const distance = (depth - camera.position.z) / dir.z;
+              return camera.position.clone().add(dir.multiplyScalar(distance));
+            }
+
+            if (shirt && leftArm && rightArm) {
+              const leftShoulderWorld = landmarkToWorld(
+                leftShoulder,
+                camera,
+                1.5,
+              );
+              const rightShoulderWorld = landmarkToWorld(
+                rightShoulder,
+                camera,
+                1.5,
               );
 
-              // landmark indices (MediaPipe Pose)
-              const L_SH = 11,
-                L_EL = 13,
-                L_WR = 15;
-              const R_SH = 12,
-                R_EL = 14,
-                R_WR = 16;
+              const poseShoulderMid = new THREE.Vector3()
+                .addVectors(leftShoulderWorld, rightShoulderWorld)
+                .multiplyScalar(0.5);
+              const poseShoulderVector = rightShoulderWorld
+                .clone()
+                .sub(leftShoulderWorld);
 
-              // helper to map normalized landmark -> THREE world-like coords
-              const mapLandmarkToWorld = (lm: {
-                x: number;
-                y: number;
-                z: number;
-              }) => {
-                const mirrored = true; // set false if webcam not mirrored
-                const x = ((mirrored ? 1 - lm.x : lm.x) - 0.5) * 3.5; // same horizontal scale you use for shirt
-                const y = -(lm.y - 0.5) * 3.5 + 1.2; // same vertical mapping as shirt
-                const z = -lm.z * 4.0; // tune depth scale (z sign may need flip)
-                return new THREE.Vector3(x, y, z);
-              };
+              shirt.updateMatrixWorld(true);
 
-              if (leftArm && rightArm) {
-                const lShoulder = mapLandmarkToWorld(landmark[L_SH]);
-                const lElbow = mapLandmarkToWorld(landmark[L_EL]);
-                const rShoulder = mapLandmarkToWorld(landmark[R_SH]);
-                const rElbow = mapLandmarkToWorld(landmark[R_EL]);
+              const modelLeftShoulderWorld = new THREE.Vector3();
+              const modelRightShoulderWorld = new THREE.Vector3();
+              leftArm.getWorldPosition(modelLeftShoulderWorld);
+              rightArm.getWorldPosition(modelRightShoulderWorld);
 
-                // desired directions in world-like coords
-                const lDir = new THREE.Vector3()
-                  .subVectors(lElbow, lShoulder)
-                  .normalize();
-                const rDir = new THREE.Vector3()
-                  .subVectors(rElbow, rShoulder)
-                  .normalize();
+              const modelShoulderVector = modelRightShoulderWorld
+                .clone()
+                .sub(modelLeftShoulderWorld);
 
-                // convert world-like positions to the bone's parent-local space (important)
-                const lParent = leftArm.parent!;
-                const rParent = rightArm.parent!;
+              const poseShoulderDistance = poseShoulderVector.length();
+              const modelShoulderDistance = modelShoulderVector.length();
 
-                const lDirLocal = lDir.clone();
-                const rDirLocal = rDir.clone();
-
-                // If you computed positions instead of directions, do:
-                // lParent.worldToLocal(lShoulder); lParent.worldToLocal(lElbow); compute dirLocal from those.
-                // Here we assume consistent mapping so converting direction by inverse rotation helps:
-                lParent
-                  .getWorldQuaternion(new THREE.Quaternion())
-                  .invert()
-                  .multiplyVector3?.(lDirLocal); // fallback explained below
-
-                // safest approach: compute shoulder/elbow in parent-local then subtract:
-                const lShoulderWorld = mapLandmarkToWorld(landmark[L_SH]);
-                const lElbowWorld = mapLandmarkToWorld(landmark[L_EL]);
-                lParent.worldToLocal(lShoulderWorld);
-                lParent.worldToLocal(lElbowWorld);
-                lDirLocal.copy(lElbowWorld).sub(lShoulderWorld).normalize();
-
-                const rShoulderWorld = mapLandmarkToWorld(landmark[R_SH]);
-                const rElbowWorld = mapLandmarkToWorld(landmark[R_EL]);
-                rParent.worldToLocal(rShoulderWorld);
-                rParent.worldToLocal(rElbowWorld);
-                rDirLocal.copy(rElbowWorld).sub(rShoulderWorld).normalize();
-
-                // assume bone's rest direction is +Y (0,1,0). If different, change restAxis
-                const restAxis = new THREE.Vector3(0, 1, 0);
-
-                const lQuat = new THREE.Quaternion().setFromUnitVectors(
-                  restAxis,
-                  lDirLocal,
+              if (modelShoulderDistance > 0) {
+                const scaleFactor = poseShoulderDistance / modelShoulderDistance;
+                const modelAngle = Math.atan2(
+                  modelShoulderVector.y,
+                  modelShoulderVector.x,
                 );
-                const rQuat = new THREE.Quaternion().setFromUnitVectors(
-                  restAxis,
-                  rDirLocal,
+                const poseAngle = Math.atan2(
+                  poseShoulderVector.y,
+                  poseShoulderVector.x,
                 );
+                const rotationZ = poseAngle - modelAngle;
 
-                // smooth the movement
-                leftArm.quaternion.slerp(lQuat, 0.6);
-                rightArm.quaternion.slerp(rQuat, 0.6);
-              }
-
-              shirt.position.set(
-                (centerX - 0.5) * 3.5,
-                -centerY * 3.5 + 1.2,
-                0,
-              );
-              shirt.scale.setScalar(Math.max(0.8, shoulderWidth * 4.2));
-              shirt.rotation.y = (leftShoulder.x - rightShoulder.x) * 0.3;
-              shirt.rotation.z = (rightShoulder.y - leftShoulder.y) * 0.2;
-
-              if (leftArm) {
-                leftArm.position.x = (leftShoulder.x - rightShoulder.x) * 0.5;
-              }
-              if (rightArm) {
-                rightArm.rotation.z = (rightShoulder.y - leftShoulder.y) * 0.5;
+                shirt.position.copy(poseShoulderMid);
+                shirt.scale.setScalar(scaleFactor);
+                shirt.rotation.set(0, 0, rotationZ);
               }
             }
 

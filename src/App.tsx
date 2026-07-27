@@ -82,6 +82,10 @@ export default function App({
 
     loader.load(modelUrl, (gltf: {scene: any}) => {
       shirt = gltf.scene;
+      if (!shirt) {
+        console.error("Failed to load shirt model");
+        return;
+      }
       shirt.traverse((child: any) => {
         if (child instanceof THREE.Bone) {
           if (child.name === "arm_left_shoulder_2_010") {
@@ -197,55 +201,16 @@ export default function App({
               return camera.position.clone().add(dir.multiplyScalar(distance));
             }
 
-            if (shirt && leftArm && rightArm) {
+            if (shirt) {
               const leftShoulderWorld = landmarkToWorld(
                 leftShoulder,
                 camera,
                 1.5,
               );
-              const rightShoulderWorld = landmarkToWorld(
-                rightShoulder,
-                camera,
-                1.5,
-              );
 
-              const poseShoulderMid = new THREE.Vector3()
-                .addVectors(leftShoulderWorld, rightShoulderWorld)
-                .multiplyScalar(0.5);
-              const poseShoulderVector = rightShoulderWorld
-                .clone()
-                .sub(leftShoulderWorld);
-
-              shirt.updateMatrixWorld(true);
-
-              const modelLeftShoulderWorld = new THREE.Vector3();
-              const modelRightShoulderWorld = new THREE.Vector3();
-              leftArm.getWorldPosition(modelLeftShoulderWorld);
-              rightArm.getWorldPosition(modelRightShoulderWorld);
-
-              const modelShoulderVector = modelRightShoulderWorld
-                .clone()
-                .sub(modelLeftShoulderWorld);
-
-              const poseShoulderDistance = poseShoulderVector.length();
-              const modelShoulderDistance = modelShoulderVector.length();
-
-              if (modelShoulderDistance > 0) {
-                const scaleFactor = poseShoulderDistance / modelShoulderDistance;
-                const modelAngle = Math.atan2(
-                  modelShoulderVector.y,
-                  modelShoulderVector.x,
-                );
-                const poseAngle = Math.atan2(
-                  poseShoulderVector.y,
-                  poseShoulderVector.x,
-                );
-                const rotationZ = poseAngle - modelAngle;
-
-                shirt.position.copy(poseShoulderMid);
-                shirt.scale.setScalar(scaleFactor);
-                shirt.rotation.set(0, 0, rotationZ);
-              }
+              shirt.position.x = leftShoulderWorld.x;
+              shirt.position.y = 0.5;
+              shirt.position.z = leftShoulderWorld.z;
             }
 
             setStatusMessage("Pose detected");

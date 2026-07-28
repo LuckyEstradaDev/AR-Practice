@@ -86,12 +86,22 @@ export default function App({
         console.error("Failed to load shirt model");
         return;
       }
+
+      // Show the skeleton
+      const skeletonHelper = new THREE.SkeletonHelper(shirt);
+      scene.add(skeletonHelper);
+
+      const axesHelper = new THREE.AxesHelper(1);
+      shirt.add(axesHelper);
+
+      //print all the skeleton bones console
+
       shirt.traverse((child: any) => {
-        if (child instanceof THREE.Bone) {
-          if (child.name === "arm_left_shoulder_2_010") {
+        if (child.isBone) {
+          if (child.name === "upperarm_l_014") {
             leftArm = child;
           }
-          if (child.name === "arm_right_shoulder_2_060") {
+          if (child.name === "upperarm_r_0148") {
             rightArm = child;
           }
         }
@@ -208,9 +218,19 @@ export default function App({
                 1.5,
               );
 
-              shirt.position.x = leftShoulderWorld.x;
-              shirt.position.y = 0.5;
-              shirt.position.z = leftShoulderWorld.z;
+              const rightShoulderWorld = landmarkToWorld(
+                rightShoulder,
+                camera,
+                1.5,
+              );
+
+              const midPoint = new THREE.Vector3()
+                .addVectors(leftShoulderWorld, rightShoulderWorld)
+                .multiplyScalar(0.5);
+
+              shirt.position.copy(midPoint);
+              shirt.position.y -= 3.3; // Adjust the vertical position of the shirt
+              shirt.scale.set(2.3, 2.3, 2.3); // Adjust the scale of the shirt
             }
 
             setStatusMessage("Pose detected");

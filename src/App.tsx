@@ -37,8 +37,8 @@ export default function App({
 
     //model
     let shirt: THREE.Object3D | null = null;
+    let rightArm: THREE.Bone | null = null; //inverted
     let leftArm: THREE.Bone | null = null;
-    let rightArm: THREE.Bone | null = null;
     const clock = new THREE.Clock();
 
     const loader = new GLTFLoader();
@@ -72,10 +72,10 @@ export default function App({
       // const t = clock.getElapsedTime();
       // if (shirt) {
       //   if (leftArm) {
-      //     leftArm.rotation.z = Math.sin(t * 12) * 0.5;
+      //     leftArm.rotation.y = Math.sin(t * 12) * 0.5;
       //   }
       //   if (rightArm) {
-      //     rightArm.rotation.z = Math.sin(t * 12) * 0.5;
+      //     rightArm.rotation.y = Math.sin(t * 12) * 0.5;
       //   }
       // }
     };
@@ -99,10 +99,11 @@ export default function App({
       shirt.traverse((child: any) => {
         if (child.isBone) {
           if (child.name === "upperarm_l_014") {
-            leftArm = child;
-          }
-          if (child.name === "upperarm_r_0148") {
             rightArm = child;
+          }
+
+          if (child.name === "upperarm_r_0148") {
+            leftArm = child;
           }
         }
       });
@@ -186,7 +187,10 @@ export default function App({
 
           for (const landmark of result.landmarks) {
             const leftShoulder = landmark[11];
+            const leftElbow = landmark[13];
+
             const rightShoulder = landmark[12];
+            const rightElbow = landmark[14]; //invered
 
             if (!leftShoulder || !rightShoulder) {
               continue;
@@ -229,8 +233,21 @@ export default function App({
                 .multiplyScalar(0.5);
 
               shirt.position.copy(midPoint);
-              shirt.position.y -= 3.3; // Adjust the vertical position of the shirt
-              shirt.scale.set(2.3, 2.3, 2.3); // Adjust the scale of the shirt
+              shirt.position.y -= 3.6; // Adjust the vertical position of the shirt
+              shirt.scale.set(2.5, 2.5, 2.5); // Adjust the scale of the shirt
+
+              const rightdx = rightElbow.x - rightShoulder.x;
+              const rightdy = rightElbow.y - rightShoulder.y;
+
+              const angle = Math.atan2(rightdy, -rightdx);
+
+              rightArm!.rotation.y = angle;
+
+              const leftdx = leftElbow.x - leftShoulder.x;
+              const leftdy = leftElbow.y - leftShoulder.y;
+              const leftAngle = Math.atan2(leftdy, leftdx);
+
+              leftArm!.rotation.y = leftAngle;
             }
 
             setStatusMessage("Pose detected");
@@ -238,15 +255,15 @@ export default function App({
             ctx.save();
             ctx.globalAlpha = 0.5;
 
-            drawingUtils.drawLandmarks(landmark, {
-              radius: (data) =>
-                DrawingUtils.lerp(data.from!.z, -0.15, 0.1, 5, 1),
-            });
+            // drawingUtils.drawLandmarks(landmark, {
+            //   radius: (data) =>
+            //     DrawingUtils.lerp(data.from!.z, -0.15, 0.1, 5, 1),
+            // });
 
-            drawingUtils.drawConnectors(
-              landmark,
-              PoseLandmarker.POSE_CONNECTIONS,
-            );
+            // drawingUtils.drawConnectors(
+            //   landmark,
+            //   PoseLandmarker.POSE_CONNECTIONS,
+            // );
             ctx.restore();
           }
         });

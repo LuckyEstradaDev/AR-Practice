@@ -188,9 +188,11 @@ export default function App({
           for (const landmark of result.landmarks) {
             const leftShoulder = landmark[11];
             const leftElbow = landmark[13];
+            const leftWrist = landmark[15];
 
             const rightShoulder = landmark[12];
             const rightElbow = landmark[14]; //invered
+            const rightWrist = landmark[16];
 
             if (!leftShoulder || !rightShoulder) {
               continue;
@@ -248,6 +250,18 @@ export default function App({
               const leftAngle = Math.atan2(leftdy, leftdx);
 
               leftArm!.rotation.y = leftAngle;
+
+              const leftWristdx = leftWrist.x - leftElbow.x;
+              const leftWristdy = leftWrist.y - leftElbow.y;
+              const leftWristAngle = Math.atan2(leftWristdy, leftWristdx);
+
+              leftArm!.rotation.z = leftWristAngle;
+
+              const rightWristdx = rightWrist.x - rightElbow.x;
+              const rightWristdy = rightWrist.y - rightElbow.y;
+              const rightWristAngle = Math.atan2(rightWristdy, -rightWristdx);
+
+              rightArm!.rotation.z = rightWristAngle;
             }
 
             setStatusMessage("Pose detected");

@@ -39,6 +39,7 @@ export default function App({
     let shirt: THREE.Object3D | null = null;
     let rightArm: THREE.Bone | null = null; //inverted
     let leftArm: THREE.Bone | null = null;
+    let leftElbowBone: THREE.Bone | null = null;
     const clock = new THREE.Clock();
 
     const loader = new GLTFLoader();
@@ -104,6 +105,10 @@ export default function App({
 
           if (child.name === "upperarm_r_0148") {
             leftArm = child;
+          }
+
+          if (child.name === "lowerarm_l_015") {
+            leftElbowBone = child;
           }
         }
       });
@@ -255,13 +260,13 @@ export default function App({
               const leftWristdy = leftWrist.y - leftElbow.y;
               const leftWristAngle = Math.atan2(leftWristdy, leftWristdx);
 
-              leftArm!.rotation.z = leftWristAngle;
+              leftElbowBone!.rotation.x = leftWristAngle;
 
-              const rightWristdx = rightWrist.x - rightElbow.x;
-              const rightWristdy = rightWrist.y - rightElbow.y;
-              const rightWristAngle = Math.atan2(rightWristdy, -rightWristdx);
+              // const rightWristdx = rightWrist.x - rightElbow.x;
+              // const rightWristdy = rightWrist.y - rightElbow.y;
+              // const rightWristAngle = Math.atan2(rightWristdy, -rightWristdx);
 
-              rightArm!.rotation.z = rightWristAngle;
+              // rightArm!.rotation.y = rightWristAngle;
             }
 
             setStatusMessage("Pose detected");

@@ -274,15 +274,15 @@ export default function App({
             ctx.save();
             ctx.globalAlpha = 0.5;
 
-            // drawingUtils.drawLandmarks(landmark, {
-            //   radius: (data) =>
-            //     DrawingUtils.lerp(data.from!.z, -0.15, 0.1, 5, 1),
-            // });
+            drawingUtils.drawLandmarks(landmark, {
+              radius: (data) =>
+                DrawingUtils.lerp(data.from!.z, -0.15, 0.1, 5, 1),
+            });
 
-            // drawingUtils.drawConnectors(
-            //   landmark,
-            //   PoseLandmarker.POSE_CONNECTIONS,
-            // );
+            drawingUtils.drawConnectors(
+              landmark,
+              PoseLandmarker.POSE_CONNECTIONS,
+            );
             ctx.restore();
           }
         });

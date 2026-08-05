@@ -39,7 +39,9 @@ export default function App({
     let shirt: THREE.Object3D | null = null;
     let rightArm: THREE.Bone | null = null; //inverted
     let leftArm: THREE.Bone | null = null;
+    let rightElbowBone: THREE.Bone | null = null;
     let leftElbowBone: THREE.Bone | null = null;
+    let rootJoint: THREE.Bone | null = null;
     const clock = new THREE.Clock();
 
     const loader = new GLTFLoader();
@@ -88,12 +90,12 @@ export default function App({
         return;
       }
 
-      // Show the skeleton
-      const skeletonHelper = new THREE.SkeletonHelper(shirt);
-      scene.add(skeletonHelper);
+      // // Show the skeleton
+      // const skeletonHelper = new THREE.SkeletonHelper(shirt);
+      // scene.add(skeletonHelper);
 
-      const axesHelper = new THREE.AxesHelper(1);
-      shirt.add(axesHelper);
+      // const axesHelper = new THREE.AxesHelper(1);
+      // shirt.add(axesHelper);
 
       //print all the skeleton bones console
 
@@ -108,7 +110,15 @@ export default function App({
           }
 
           if (child.name === "lowerarm_l_015") {
+            rightElbowBone = child;
+          }
+
+          if (child.name === "lowerarm_r_0149") {
             leftElbowBone = child;
+          }
+
+          if (child.name === "_rootJoint") {
+            rootJoint = child;
           }
         }
       });
@@ -191,6 +201,11 @@ export default function App({
           }
 
           for (const landmark of result.landmarks) {
+            const world = result.worldLandmarks[0];
+
+            const leftShoulderWorldMP = world[11];
+            const rightShoulderWorldMP = world[12];
+
             const leftShoulder = landmark[11];
             const leftElbow = landmark[13];
             const leftWrist = landmark[15];
@@ -240,33 +255,62 @@ export default function App({
                 .multiplyScalar(0.5);
 
               shirt.position.copy(midPoint);
-              shirt.position.y -= 3.6; // Adjust the vertical position of the shirt
-              shirt.scale.set(2.5, 2.5, 2.5); // Adjust the scale of the shirt
+              shirt.position.y -= 2.9; // Adjust the vertical position of the shirt
 
-              const rightdx = rightElbow.x - rightShoulder.x;
-              const rightdy = rightElbow.y - rightShoulder.y;
+              //adjust shrt size based on distance between shoulders
+              const shoulderDistance = Math.sqrt(
+                Math.pow(leftShoulderWorldMP.x - rightShoulderWorldMP.x, 2) +
+                  Math.pow(leftShoulderWorldMP.y - rightShoulderWorldMP.y, 2) +
+                  Math.pow(leftShoulderWorldMP.z - rightShoulderWorldMP.z, 2),
+              );
 
-              const angle = Math.atan2(rightdy, -rightdx);
+              const targetScale = shoulderDistance * 6;
+              rootJoint!.scale.x = 1.2;
 
-              rightArm!.rotation.y = angle;
+              shirt.scale.lerp(
+                new THREE.Vector3(targetScale, targetScale, targetScale),
+                0.15,
+              );
 
-              const leftdx = leftElbow.x - leftShoulder.x;
-              const leftdy = leftElbow.y - leftShoulder.y;
-              const leftAngle = Math.atan2(leftdy, leftdx);
+              //BODY ROTATION (ROTATE THE ROOJOINT BASED ON SHOULDER ANGLE)
+              if (rootJoint) {
+                const shoulderAngle = Math.atan2(
+                  rightShoulderWorld.y - leftShoulderWorld.y,
+                  rightShoulderWorld.x - leftShoulderWorld.x,
+                );
 
-              leftArm!.rotation.y = leftAngle;
+                rootJoint.rotation.z = -shoulderAngle;
+              }
 
-              const leftWristdx = leftWrist.x - leftElbow.x;
-              const leftWristdy = leftWrist.y - leftElbow.y;
-              const leftWristAngle = Math.atan2(leftWristdy, leftWristdx);
+              //ARM MOVEMENTS
 
-              leftElbowBone!.rotation.x = leftWristAngle;
+              const upperAngle = Math.atan2(
+                rightElbow.y - rightShoulder.y,
+                -(rightElbow.x - rightShoulder.x),
+              );
 
-              // const rightWristdx = rightWrist.x - rightElbow.x;
-              // const rightWristdy = rightWrist.y - rightElbow.y;
-              // const rightWristAngle = Math.atan2(rightWristdy, -rightWristdx);
+              const foreAngle = Math.atan2(
+                rightWrist.y - rightElbow.y,
+                -(rightWrist.x - rightElbow.x),
+              );
 
-              // rightArm!.rotation.y = rightWristAngle;
+              rightArm!.rotation.y = upperAngle;
+              rightElbowBone!.rotation.y = foreAngle - upperAngle;
+
+              const leftUpperAngle = Math.atan2(
+                leftElbow.y - leftShoulder.y,
+                leftElbow.x - leftShoulder.x,
+              );
+
+              const leftForeAngle = Math.atan2(
+                leftWrist.y - leftElbow.y,
+                leftWrist.x - leftElbow.x,
+              );
+
+              leftArm!.rotation.y = leftUpperAngle;
+              leftElbowBone!.rotation.y = leftForeAngle - leftUpperAngle;
+
+              //ARM MOVEMENTS
             }
 
             setStatusMessage("Pose detected");

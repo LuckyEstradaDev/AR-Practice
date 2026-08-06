@@ -264,7 +264,7 @@ export default function App({
                   Math.pow(leftShoulderWorldMP.z - rightShoulderWorldMP.z, 2),
               );
 
-              const targetScale = shoulderDistance * 6;
+              const targetScale = shoulderDistance * 6.1;
               rootJoint!.scale.x = 1.2;
 
               shirt.scale.lerp(
@@ -318,16 +318,16 @@ export default function App({
             ctx.save();
             ctx.globalAlpha = 0.5;
 
-            drawingUtils.drawLandmarks(landmark, {
-              radius: (data) =>
-                DrawingUtils.lerp(data.from!.z, -0.15, 0.1, 5, 1),
-            });
+            // drawingUtils.drawLandmarks(landmark, {
+            //   radius: (data) =>
+            //     DrawingUtils.lerp(data.from!.z, -0.15, 0.1, 5, 1),
+            // });
 
-            drawingUtils.drawConnectors(
-              landmark,
-              PoseLandmarker.POSE_CONNECTIONS,
-            );
-            ctx.restore();
+            // drawingUtils.drawConnectors(
+            //   landmark,
+            //   PoseLandmarker.POSE_CONNECTIONS,
+            // );
+            // ctx.restore();
           }
         });
 

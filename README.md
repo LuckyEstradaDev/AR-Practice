@@ -82,6 +82,17 @@ If build issues persist, check Node version first. Newer Vite releases may requi
 
 1. Node `20.19+` or `22.12+`
 
+## 7) Body fit, sizing & size picker
+
+The outfit is now scaled and anchored to the user's body (no hard-coded offsets
+or multipliers left), the app estimates the user's clothing size and warns when
+the outfit does not match real-life proportions, and the user can pick a size
+(`Auto · XS S M L XL`) which rescales the garment and re-judges the fit.
+
+See [`docs/fit-and-sizing.md`](./docs/fit-and-sizing.md) for the full write-up:
+what changed, how sizing and the verdict work, the frame-by-frame data flow, a
+tuning table for every constant, edge cases and a verification checklist.
+
 ## Files touched
 
 1. [`vite.config.js`](./vite.config.js)
@@ -89,3 +100,5 @@ If build issues persist, check Node version first. Newer Vite releases may requi
 3. [`src/App.tsx`](./src/App.tsx)
 4. [`src/components/WebCam.tsx`](./src/components/WebCam.tsx)
 5. [`src/main.jsx`](./src/main.jsx)
+6. [`src/lib/bodyFit.ts`](./src/lib/bodyFit.ts)
+7. [`docs/fit-and-sizing.md`](./docs/fit-and-sizing.md)

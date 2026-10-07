@@ -2,7 +2,7 @@ import {forwardRef, useImperativeHandle, useRef} from "react";
 import Webcam from "react-webcam";
 
 export type WebcamHandle = {
-  video?: HTMLVideoElement;
+  video?: HTMLVideoElement | null;
 };
 
 type WebCamProps = {

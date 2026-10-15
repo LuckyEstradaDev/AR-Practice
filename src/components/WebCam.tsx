@@ -2,7 +2,7 @@ import {forwardRef, useImperativeHandle, useRef} from "react";
 import Webcam from "react-webcam";
 
 export type WebcamHandle = {
-  video?: HTMLVideoElement;
+  video?: HTMLVideoElement | null;
 };
 
 type WebCamProps = {
@@ -20,13 +20,18 @@ const WebCam = forwardRef<WebcamHandle, WebCamProps>((props, ref) => {
   }));
 
   return (
-    <div className="aspect-video w-[100%] bg-black">
+    <div className="h-full w-full bg-black">
       <Webcam
         mirrored={true}
         ref={webcamRef}
         audio={false}
         screenshotFormat="image/jpeg"
-        videoConstraints={{facingMode: "user", width: 640, height: 480}}
+        videoConstraints={{
+          facingMode: "user",
+          width: {ideal: 1280},
+          height: {ideal: 720},
+          frameRate: {ideal: 30},
+        }}
         onUserMedia={() => onStatusChange?.("Camera ready")}
         onUserMediaError={() => onStatusChange?.("Camera access denied")}
         className="h-full w-full object-cover"

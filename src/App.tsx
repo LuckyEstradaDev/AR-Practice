@@ -91,6 +91,17 @@ const ENABLE_IDLE_TEST = false;
  */
 const GARMENT_Y_OFFSET = 0;
 
+/**
+ * Horizontal nudge for the garment in world units (positive moves it to the
+ * screen's right). Leave at 0 unless the rig's shoulder joints are not centred
+ * on the mesh — the debug overlay (`?debug=1`) makes any sideways gap obvious.
+ */
+const GARMENT_X_OFFSET = 0;
+
+/** `?debug=1` draws the tracked landmarks and the overlay's reference frame. */
+const DEBUG_OVERLAY =
+  typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
+
 /** A warning must hold this long before it shows, before it clears. */
 const FIT_CONFIRM_MS = 600;
 const FIT_CONFIRM_OK_MS = 400;
@@ -147,6 +158,7 @@ export default function App({
 }) {
   const webcamRef = useRef<WebcamHandle | null>(null);
   const threeContainerRef = useRef<HTMLDivElement | null>(null);
+  const debugCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [statusMessage, setStatusMessage] = useState("Starting camera...");
 
   // Fit feedback: only re-renders when the verdict actually changes.
@@ -203,6 +215,7 @@ export default function App({
     const leftHipWorld = new THREE.Vector3();
     const rightHipWorld = new THREE.Vector3();
     const midPoint = new THREE.Vector3();
+    const debugAnchorScratch = new THREE.Vector3();
     let scaleSeeded = false;
 
     // Smoothed facing of the body, radians about the vertical: 0 = chest to
@@ -225,13 +238,29 @@ export default function App({
     let lastVideoW = 0;
     let lastVideoH = 0;
 
+    // Maps a point in container-normalized (0-1) coordinates onto the anchor
+    // plane, writing into `out` so no vectors are allocated per frame. x is
+    // flipped to match the mirrored video; y is flipped because MediaPipe y
+    // grows downward.
+    const screenToWorld = (
+      nx: number,
+      ny: number,
+      cam: THREE.PerspectiveCamera,
+      depth: number,
+      out: THREE.Vector3,
+    ) => {
+      out.set(-(nx * 2 - 1), -(ny * 2 - 1), 0.5);
+      out.unproject(cam);
+      out.sub(cam.position).normalize();
+      out.multiplyScalar((depth - cam.position.z) / out.z);
+      return out.add(cam.position);
+    };
+
     // Maps a MediaPipe landmark (x,y in 0-1 of the camera stream) onto the
-    // anchor plane, writing into `out` so no vectors are allocated per frame.
-    // The landmark is first placed into the canvas's normalized space through
-    // the video's on-screen (object-fit) rect, so the overlay stays locked to
-    // the body no matter how the window size letterboxes or crops the video. x
-    // is then flipped to match the mirrored video; y is flipped because
-    // MediaPipe y grows downward.
+    // anchor plane. The landmark is first placed into the canvas's normalized
+    // space through the video's on-screen (object-fit) rect, so the overlay
+    // stays locked to the body no matter how the window size letterboxes or
+    // crops the video.
     const landmarkToWorld = (
       landmark: {x: number; y: number},
       cam: THREE.PerspectiveCamera,
@@ -244,11 +273,7 @@ export default function App({
         nx = (videoRect.offsetX + landmark.x * videoRect.drawW) / videoRect.w;
         ny = (videoRect.offsetY + landmark.y * videoRect.drawH) / videoRect.h;
       }
-      out.set(-(nx * 2 - 1), -(ny * 2 - 1), 0.5);
-      out.unproject(cam);
-      out.sub(cam.position).normalize();
-      out.multiplyScalar((depth - cam.position.z) / out.z);
-      return out.add(cam.position);
+      return screenToWorld(nx, ny, cam, depth, out);
     };
 
     // Detection runs at most this often. The render loop still runs at the
@@ -330,6 +355,10 @@ export default function App({
     // box is the reference frame for the camera and for mapping landmarks.
     const container = threeContainerRef.current;
 
+    // Optional landmark overlay (?debug=1); a plain 2D canvas in screen space.
+    const debugCanvas = DEBUG_OVERLAY ? debugCanvasRef.current : null;
+    const debugCtx = debugCanvas?.getContext("2d") ?? null;
+
     // Recompute the video's on-screen rect (object-fit aware). Keeping this in
     // lockstep with the mapping means the garment lands on the body whether the
     // video is cropped (cover) or letterboxed (contain).
@@ -370,8 +399,18 @@ export default function App({
       const w = container.clientWidth;
       const h = container.clientHeight;
       if (!w || !h) return;
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-      renderer.setSize(w, h, false);
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      renderer.setPixelRatio(ratio);
+      // `setSize` (with its default style update) MUST set an explicit CSS
+      // size. A <canvas> is a replaced element, so with only `inset: 0` and no
+      // CSS width/height its box would fall back to the intrinsic size — the
+      // buffer (w x devicePixelRatio) — and the whole 3D layer would paint
+      // scaled up from the top-left on any display that isn't 100% scaling.
+      renderer.setSize(w, h);
+      if (debugCanvas) {
+        debugCanvas.width = Math.round(w * ratio);
+        debugCanvas.height = Math.round(h * ratio);
+      }
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       updateVideoRect();
@@ -513,7 +552,7 @@ export default function App({
 
       // Measure the model's own shoulder span (in model units = metres) purely
       // as a calibration aid: log it so METERS_PER_MODEL_UNIT can be tuned if
-      // the real-size overlay looks off. It no longer drives the fit maths.
+      // the real-size overlay looks off. It does not drive the fit maths.
       shirt.updateMatrixWorld(true);
       if (leftShoulderBone && rightShoulderBone) {
         const a = new THREE.Vector3();
@@ -530,6 +569,25 @@ export default function App({
         modelShoulderWidthRef.value = FALLBACK_MODEL_SHOULDER;
       }
       console.log("[model] shoulder span (model units / metres):", modelShoulderWidthRef.value.toFixed(3));
+
+      // Diagnostic: where the shoulder line sits within the mesh. A lateral gap
+      // between the two means anchoring on the bones (rather than the mesh
+      // centre) renders the garment off to one side — tune GARMENT_X_OFFSET.
+      const bboxCentre = new THREE.Box3().setFromObject(shirt).getCenter(new THREE.Vector3());
+      const shoulderMid = new THREE.Vector3();
+      if (leftShoulderBone && rightShoulderBone) {
+        const a = new THREE.Vector3();
+        const b = new THREE.Vector3();
+        leftShoulderBone.getWorldPosition(a);
+        rightShoulderBone.getWorldPosition(b);
+        shoulderMid.addVectors(a, b).multiplyScalar(0.5);
+      }
+      console.log(
+        "[model] bbox centre",
+        bboxCentre.toArray().map((n) => n.toFixed(3)).join(", "),
+        "| shoulder mid",
+        shoulderMid.toArray().map((n) => n.toFixed(3)).join(", "),
+      );
 
       // Capture the arms' rest pose so per-frame posing is applied as a delta
       // from how the rig was modelled. Driving the bones with an absolute
@@ -852,7 +910,7 @@ export default function App({
                 leftShoulderBone.getWorldPosition(anchorA);
                 rightShoulderBone.getWorldPosition(anchorB);
                 anchorMid.addVectors(anchorA, anchorB).multiplyScalar(0.5);
-                shirt.position.x += midPoint.x - anchorMid.x;
+                shirt.position.x += midPoint.x - anchorMid.x + GARMENT_X_OFFSET;
                 shirt.position.y += midPoint.y - anchorMid.y + GARMENT_Y_OFFSET;
                 shirt.position.z += midPoint.z - anchorMid.z;
               } else {
@@ -861,6 +919,41 @@ export default function App({
             }
 
             setStatus("Pose detected");
+          }
+
+          // Debug overlay (?debug=1): the tracked landmarks (mirrored to match
+          // what the user sees), the visible video-fit rectangle, and the
+          // garment's shoulder anchor projected back to screen space. Confirms
+          // the overlay is locked to the body at any window size / display.
+          if (debugCtx && debugCanvas) {
+            const w = debugCanvas.clientWidth;
+            const h = debugCanvas.clientHeight;
+            const dpr = w ? debugCanvas.width / w : 1;
+            debugCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            debugCtx.clearRect(0, 0, w, h);
+
+            if (videoRect) {
+              debugCtx.strokeStyle = "rgba(255,214,0,0.9)";
+              debugCtx.lineWidth = 1.5;
+              debugCtx.strokeRect(videoRect.offsetX, videoRect.offsetY, videoRect.drawW, videoRect.drawH);
+            }
+
+            debugCtx.fillStyle = "rgba(0,255,140,0.9)";
+            for (const lm of result.landmarks[0]) {
+              const nx = videoRect ? (videoRect.offsetX + lm.x * videoRect.drawW) / videoRect.w : lm.x;
+              const ny = videoRect ? (videoRect.offsetY + lm.y * videoRect.drawH) / videoRect.h : lm.y;
+              debugCtx.beginPath();
+              debugCtx.arc((1 - nx) * w, ny * h, 3, 0, Math.PI * 2);
+              debugCtx.fill();
+            }
+
+            if (shirt) {
+              const p = debugAnchorScratch.copy(midPoint).project(camera);
+              debugCtx.fillStyle = "rgba(255,60,90,0.95)";
+              debugCtx.beginPath();
+              debugCtx.arc((p.x * 0.5 + 0.5) * w, (-p.y * 0.5 + 0.5) * h, 5, 0, Math.PI * 2);
+              debugCtx.fill();
+            }
           }
         });
 
@@ -910,6 +1003,11 @@ export default function App({
 
         {/* Three.js */}
         <div ref={threeContainerRef} className="absolute inset-0" />
+
+        {/* Debug landmark overlay (?debug=1) */}
+        {DEBUG_OVERLAY && (
+          <canvas ref={debugCanvasRef} className="absolute inset-0 z-30 h-full w-full" />
+        )}
       </div>
 
       {/* Tracking status + fit chip */}

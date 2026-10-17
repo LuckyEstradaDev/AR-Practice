@@ -36,6 +36,7 @@ the user can pick a size themselves.
 | 4 | Uniform scale only — torso length never followed the body | `scaleY` follows the torso:shoulder ratio, clamped ±10 % |
 | 5 | No fit feedback | **Size estimate + fit chip + colour-coded warning** |
 | 6 | No way to choose a size | **`Auto · XS S M L XL` picker** that rescales the garment and re-judges the fit |
+| 7 | Renderer canvas sized from its buffer (`setSize(w, h, false)`), so on displays that aren't 100 % scaling the whole 3D layer painted enlarged from the top-left and drifted off the body | `setSize(w, h)` sets an explicit CSS size, so the overlay stays locked to the container at any display density, window size or orientation |
 
 Also fixed while in there:
 
@@ -301,7 +302,12 @@ before touching anything else.
    - [ ] clicking `Auto` returns to body fit
    - [ ] the toast's ✕ dismisses it, and it only returns for a *different* verdict
    - [ ] no console errors; close button does not throw
-4. Optional: check the console `[fit]` lines while tuning constants.
+4. **Overlay lock across sizes** — open with `?debug=1` (the yellow rectangle is
+   the video's fit area, green dots are landmarks, the red dot is the garment's
+   shoulder anchor). Resize the window portrait ↔ landscape and switch between a
+   100 %-scale display and a scaled one (125 %/150 %, or a phone). The garment
+   must stay on the shoulders throughout.
+5. Optional: check the console `[fit]` lines while tuning constants.
 
 ## 12. Known limitations
 

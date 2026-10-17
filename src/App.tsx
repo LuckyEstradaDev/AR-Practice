@@ -56,6 +56,28 @@ const FALLBACK_MODEL_SHOULDER = 0.174;
 const SCALE_SMOOTHING = 0.15;
 
 /**
+ * How strongly the garment turns to follow the body's facing each frame. The
+ * root eases toward a zero or half turn, so a back-turn swings the garment
+ * around instead of snapping.
+ */
+const YAW_SMOOTHING = 0.15;
+
+/**
+ * Flip to -1 if the garment turns the wrong way when the body faces sideways.
+ * Front/back are unaffected — only the left/right sense of a turn depends on
+ * MediaPipe's depth-axis convention.
+ */
+const YAW_SIGN = -1;
+
+/**
+ * Softening for the arm solver's yaw compensation. On screen an arm's angle
+ * foreshortens by cos(yaw), so the solver divides that back out — but a
+ * side-on body would divide by ~0. This keeps the gain finite and smoothly
+ * lets the arms rest when the body is edge-on.
+ */
+const ARM_YAW_EPS = 0.08;
+
+/**
  * Diagnostic switch. While true, the arm/elbow/spine bones play a looping sine
  * "idle" animation and the pose-driven rotations are skipped, so you can verify
  * the rig deforms on its own. Set to false to let body tracking drive the bones.
@@ -178,8 +200,15 @@ export default function App({
     const anchorMid = new THREE.Vector3();
     const leftShoulderWorld = new THREE.Vector3();
     const rightShoulderWorld = new THREE.Vector3();
+    const leftHipWorld = new THREE.Vector3();
+    const rightHipWorld = new THREE.Vector3();
     const midPoint = new THREE.Vector3();
     let scaleSeeded = false;
+
+    // Smoothed facing of the body, radians about the vertical: 0 = chest to
+    // camera, +-PI/2 = side-on, +-PI = back to camera. The garment root eases
+    // toward it so turns swing around instead of snapping.
+    let garmentYaw = 0;
 
     // Cached video-fit rect (object-fit aware) used to map landmarks onto the
     // canvas. Recomputed on resize / orientation change and once the stream's
@@ -666,6 +695,10 @@ export default function App({
             if (shirt) {
               landmarkToWorld(leftShoulder, camera, ANCHOR_DEPTH, leftShoulderWorld);
               landmarkToWorld(rightShoulder, camera, ANCHOR_DEPTH, rightShoulderWorld);
+              const leftHip = landmark[23];
+              const rightHip = landmark[24];
+              if (leftHip) landmarkToWorld(leftHip, camera, ANCHOR_DEPTH, leftHipWorld);
+              if (rightHip) landmarkToWorld(rightHip, camera, ANCHOR_DEPTH, rightHipWorld);
 
               midPoint.addVectors(leftShoulderWorld, rightShoulderWorld).multiplyScalar(0.5);
 
@@ -677,7 +710,23 @@ export default function App({
               const projectedShoulderWidth = leftShoulderWorld.distanceTo(rightShoulderWorld);
 
               if (projectedShoulderWidth > 0 && body.shoulder) {
-                const unitsPerMetre = projectedShoulderWidth / body.shoulder;
+                // Screen world-units per real metre at the body's depth. Yaw
+                // foreshortens the shoulder line toward nothing when the body
+                // turns side-on, which used to shrink the whole garment. A
+                // vertical span (shoulder-mid to hip-mid) does not foreshorten
+                // with yaw, so prefer it when the hips are in frame; otherwise
+                // fall back to the shoulder line folded by cos(yaw).
+                const cosYaw = Math.max(Math.abs(Math.cos(garmentYaw)), 0.35);
+                let unitsPerMetre = projectedShoulderWidth / (body.shoulder * cosYaw);
+                if (leftHip && rightHip && body.torso) {
+                  const hipMid = anchorA
+                    .addVectors(leftHipWorld, rightHipWorld)
+                    .multiplyScalar(0.5);
+                  const projectedTorso = midPoint.distanceTo(hipMid);
+                  if (projectedTorso > 0.01) {
+                    unitsPerMetre = projectedTorso / body.torso;
+                  }
+                }
 
                 // A picked size renders the garment at that size's real
                 // dimensions, relative to the size the model was authored at.
@@ -697,17 +746,46 @@ export default function App({
                 }
               }
 
-              //BODY ROTATION (ROTATE THE ROOT JOINT BASED ON SHOULDER ANGLE)
+              //BODY ROTATION (FACING + SHOULDER TILT)
               // Skipped while the idle test owns the bones.
               if (rootJoint && !ENABLE_IDLE_TEST) {
                 rootJoint.scale.x = SHOULDER_WIDEN;
 
-                const shoulderAngle = Math.atan2(
-                  rightShoulderWorld.y - leftShoulderWorld.y,
-                  rightShoulderWorld.x - leftShoulderWorld.x,
-                );
+                const dx = rightShoulderWorld.x - leftShoulderWorld.x;
+                const dy = rightShoulderWorld.y - leftShoulderWorld.y;
 
-                rootJoint.rotation.z = -shoulderAngle;
+                // Continuous yaw from the real (metre) shoulder line: its depth
+                // difference says how far the body has turned and its lateral
+                // difference keeps front and back apart. Zero faces the camera,
+                // +-PI/2 is side-on, +-PI is back-to-camera.
+                const shoulderL = worldLandmarks[11];
+                const shoulderR = worldLandmarks[12];
+                const targetYaw = shoulderL && shoulderR
+                  ? YAW_SIGN *
+                    Math.atan2(
+                      -(shoulderR.z - shoulderL.z),
+                      -(shoulderR.x - shoulderL.x),
+                    )
+                  : garmentYaw;
+                garmentYaw += shortestAngle(targetYaw - garmentYaw) * YAW_SMOOTHING;
+
+                // Shoulder-line tilt, measured in 3D so it stays stable when the
+                // body is side-on: the on-screen line collapses to a point there
+                // and would otherwise roll the garment onto its side. Magnitude
+                // comes from the real shoulder vector; the sign comes from the
+                // on-screen height difference, matching the front-facing case.
+                const roll = shoulderL && shoulderR
+                  ? Math.sign(dy) *
+                    Math.atan2(
+                      Math.abs(shoulderR.y - shoulderL.y),
+                      Math.hypot(
+                        shoulderR.x - shoulderL.x,
+                        shoulderR.z - shoulderL.z,
+                      ),
+                    )
+                  : Math.atan2(dy, Math.abs(dx));
+
+                rootJoint.rotation.set(0, garmentYaw, roll);
               }
 
               //ARM MOVEMENTS (only when the model actually has an arm rig)
@@ -719,10 +797,34 @@ export default function App({
                 // apply it as a delta from the captured rest pose. The same
                 // maths serves both arms; the per-arm rest offsets and zSign
                 // (calibrated from each bone's mirrored rest) handle the sides.
+                // The solver reads arm angles off the screen, which a body yaw
+                // foreshortens by cos(yaw). Divide that back out (keeping its
+                // sign) so the same physical swing tracks through front, side
+                // and back; the softened divisor keeps the gain finite edge-on.
+                const cosYaw = Math.cos(garmentYaw);
+                const stretch =
+                  (cosYaw * (1 + ARM_YAW_EPS)) / (cosYaw * cosYaw + ARM_YAW_EPS);
                 const solveArm = (rest: ArmCalibration, upTarget: number, foreTarget: number) => {
-                  const dUp = shortestAngle(upTarget - rest.upAngle);
+                  // The rest pose was captured facing the camera, so a turned
+                  // body projects it mirrored (lateral scaled by cos(yaw)).
+                  // Apply that same projection to the rest reference; otherwise
+                  // an arm that is simply still reads as a big delta and flares.
+                  const restUp = Math.atan2(
+                    Math.sin(rest.upAngle),
+                    Math.cos(rest.upAngle) * cosYaw,
+                  );
+                  const restFore = Math.atan2(
+                    Math.sin(rest.foreAngle),
+                    Math.cos(rest.foreAngle) * cosYaw,
+                  );
+                  // Both terms use the same yaw factor: the upper arm drives its
+                  // own bone and the elbow is measured relative to it, so if the
+                  // factor is applied to only one the forearm inverts as the
+                  // body turns. `stretch` carries the sign of cos(yaw), which
+                  // cancels the arm bone's local-Z axis flipping at the back.
+                  const dUp = shortestAngle(upTarget - restUp) * stretch;
                   const armZ = rest.upLocalZ + rest.upZSign * dUp;
-                  const dForeWorld = foreTarget - rest.foreAngle - dUp;
+                  const dForeWorld = shortestAngle(foreTarget - restFore) * stretch - dUp;
                   const elbowZ = rest.elbowLocalZ + rest.foreZSign * dForeWorld;
                   return {armZ, elbowZ};
                 };
